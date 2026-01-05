@@ -16,88 +16,80 @@
     <canvas id="pong" width="600" height="400"></canvas>
 
     <script>
-        const canvas = document.getElementById("pong");
-        const ctx = canvas.getContext("2d");
-        const statusEl = document.getElementById("status");
+    const canvas = document.getElementById("pong");
+    const ctx = canvas.getContext("2d");
+    const statusEl = document.getElementById("status");
 
-        // LIGAÇÃO AO TEU TÚNEL (multiplayerpong.thedinis.com)
-        // Certifica-te que este é o endereço configurado no teu Cloudflare Tunnel
-       const socket = io("https://multiplayerpong.thedinis.com");
+    const socket = io("https://multiplayerpong.thedinis.com");
 
-        let player1 = { y: 150 };
-        let player2 = { y: 150 };
-        let ball = { x: 300, y: 200 };
-        let myRole = null;
+    let players = {};
+    let ball = { x: 300, y: 200 }; // Posição inicial
+    let myRole = null;
 
-        socket.on("connect", () => {
-            statusEl.innerText = "Ligado ao Umbrel! À espera de adversário...";
-            statusEl.style.color = "#4CAF50";
-        });
+    socket.on("connect", () => {
+        statusEl.innerText = "Ligado ao Umbrel! À espera de adversário...";
+        statusEl.style.color = "#4CAF50";
+    });
 
-        socket.on("connect_error", (error) => {
-            statusEl.innerText = "Erro de ligação ao servidor (502/Porta Fechada)";
-            statusEl.style.color = "#ff4444";
-        });
+    socket.on("playerRole", (role) => {
+        myRole = role;
+        statusEl.innerText = "Ligado! És o Jogador " + myRole;
+    });
 
-        socket.on("playerRole", (role) => {
-            myRole = role;
-            statusEl.innerText = "Ligado! És o Jogador " + myRole;
-        });
+    function move(e) {
+        let rect = canvas.getBoundingClientRect();
+        let clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        let scaleY = canvas.height / rect.height;
+        let newY = (clientY - rect.top) * scaleY - 50;
 
-        // Função de movimento (Rato e Toque)
-        function move(e) {
-            let rect = canvas.getBoundingClientRect();
-            let clientY = e.touches ? e.touches[0].clientY : e.clientY;
-            let scaleY = canvas.height / rect.height;
-            let newY = (clientY - rect.top) * scaleY - 50;
+        // Envia o movimento para o Umbrel
+        socket.emit("paddleMove", { y: newY });
+    }
 
-            // Só controlamos a nossa raquete localmente para não haver lag
-            if (myRole === 1) player1.y = newY;
-            else if (myRole === 2) player2.y = newY;
+    canvas.addEventListener("mousemove", move);
+    canvas.addEventListener("touchmove", (e) => { e.preventDefault(); move(e); }, { passive: false });
 
-            // Envia a posição para o Umbrel
-            socket.emit("paddleMove", { y: newY });
+    // ESTA É A PARTE CRUCIAL: Recebe o estado completo (Bola + Jogadores)
+    socket.on("gameState", (data) => {
+        players = data.players; // Atualiza todas as raquetes
+        ball.x = data.ball.x;   // Atualiza a posição X da bola vinda do Umbrel
+        ball.y = data.ball.y;   // Atualiza a posição Y da bola vinda do Umbrel
+    });
+
+    function draw() {
+        ctx.fillStyle = "#000";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        // Linha central
+        ctx.setLineDash([10, 10]);
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(canvas.width/2, 0);
+        ctx.lineTo(canvas.width/2, canvas.height);
+        ctx.stroke();
+
+        // Desenhar Raquetes usando os dados do Servidor
+        ctx.fillStyle = "#fff";
+        ctx.setLineDash([]); // Retira o tracejado para as raquetes
+        
+        let i = 1;
+        for (let id in players) {
+            let p = players[id];
+            // Jogador 1 à esquerda (10px), Jogador 2 à direita (580px)
+            let xPos = (p.role === 1) ? 10 : 580;
+            ctx.fillRect(xPos, p.y, 10, 100);
         }
 
-        canvas.addEventListener("mousemove", move);
-        canvas.addEventListener("touchmove", (e) => { e.preventDefault(); move(e); }, { passive: false });
+        // Desenhar a Bola na posição que o Umbrel mandou
+        ctx.beginPath();
+        ctx.arc(ball.x, ball.y, 8, 0, Math.PI*2);
+        ctx.fill();
 
-        // Recebe posições de TODOS os jogadores do servidor
-        socket.on("updatePlayers", (playersData) => {
-            const ids = Object.keys(playersData);
-            ids.forEach(id => {
-                if (id !== socket.id) {
-                    // O adversário é quem não tem o nosso ID
-                    player2.y = playersData[id].y;
-                } else {
-                    player1.y = playersData[id].y;
-                }
-            });
-        });
-
-        function draw() {
-            ctx.fillStyle = "#000";
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Linha central
-            ctx.setLineDash([10, 10]);
-            ctx.strokeStyle = "#fff";
-            ctx.lineWidth = 2;
-            ctx.strokeRect(canvas.width/2, 0, 0, canvas.height);
-
-            // Raquetes
-            ctx.fillStyle = "#fff";
-            ctx.fillRect(10, player1.y, 10, 100);  // Esquerda
-            ctx.fillRect(580, player2.y, 10, 100); // Direita
-
-            // Bola
-            ctx.beginPath();
-            ctx.arc(ball.x, ball.y, 8, 0, Math.PI*2);
-            ctx.fill();
-
-            requestAnimationFrame(draw);
-        }
-        draw();
+        requestAnimationFrame(draw);
+    }
+    draw();
+        
     </script>
 </body>
 </html>
